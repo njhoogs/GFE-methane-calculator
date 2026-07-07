@@ -1,1 +1,75 @@
+# Green Fields Energy — build & deploy to GitHub Pages
+# Injects config from repository secrets into index.html at deploy time, so the
+# committed file never contains the key / URL / token.
+#
+# SETUP (one-time):
+#   1. Put this file at:  .github/workflows/deploy.yml
+#   2. Repo Settings -> Pages -> Build and deployment -> Source: GitHub Actions
+#   3. Make sure these repository secrets exist (Settings -> Secrets and
+#      variables -> Actions):
+#        GOOGLE_MAPS_API_KEY   -> your Maps key
+#        APPS_SCRIPT_URL       -> the Apps Script /exec URL
+#        APPS_SCRIPT_SECRET    -> the shared token (matches TOKEN in Code.gs)
+#   4. Push to main. The site builds and deploys automatically.
+#
+# NOTE: the Maps key and Apps Script URL are still visible in the LIVE page
+# (a browser map needs the key to load). Secrets only keep them out of your
+# committed code. Protect the Maps key with an HTTP-referrer restriction
+# (njhoogs.github.io/*) in Google Cloud Console.
+
+name: Deploy site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build site with injected config
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          APPS_SCRIPT_URL: ${{ secrets.APPS_SCRIPT_URL }}
+          APPS_SCRIPT_SECRET: ${{ secrets.APPS_SCRIPT_SECRET }}
+        run: |
+          mkdir -p _site
+          cp index.html _site/index.html
+          python3 - <<'PY'
+          import os
+          f = '_site/index.html'
+          s = open(f, encoding='utf-8').read()
+          repl = {
+            '__GMAPS_KEY__':  'GOOGLE_MAPS_API_KEY',
+            '__CLOUD_URL__':  'APPS_SCRIPT_URL',
+            '__CLOUD_TOKEN__':'APPS_SCRIPT_SECRET',
+          }
+          for ph, env in repl.items():
+              s = s.replace(ph, os.environ.get(env, ''))
+          open(f, 'w', encoding='utf-8').write(s)
+          print('Injected:', {ph: bool(os.environ.get(env)) for ph, env in repl.items()})
+          PY
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
 
